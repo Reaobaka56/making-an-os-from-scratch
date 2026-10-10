@@ -1,6 +1,10 @@
-
+// Minimal kernel: asks Limine for a framebuffer and paints it.
 #include <stdint.h>
 #include <stddef.h>
+#include "console.hpp"
+#include "serial.hpp"
+#include "gdt.hpp"
+#include "idt.hpp"
 
 namespace {
 
@@ -49,16 +53,20 @@ void kmain() {
     Framebuffer* fb = r->framebuffers[0];
     if (fb->bpp != 32) halt();
 
-  
-    for (uint64_t y = 0; y < fb->height; y++) {
-        auto* row = reinterpret_cast<uint32_t*>(
-            static_cast<uint8_t*>(fb->address) + y * fb->pitch);
-        for (uint64_t x = 0; x < fb->width; x++) {
-            uint32_t g = static_cast<uint32_t>(x * 255 / fb->width);
-            uint32_t b = static_cast<uint32_t>(y * 255 / fb->height);
-            row[x] = (0x20u << 16) | (g << 8) | b;
-        }
-    }
+    serial_init();
+    console_init(fb->address, fb->width, fb->height, fb->pitch);
+    kprintf("making-an-os\n");
+    kprintf("framebuffer %lux%lu bpp=%u\n", fb->width, fb->height, (unsigned)fb->bpp);
+
+    gdt_init();
+    kprintf("GDT loaded\n");
+    idt_init();
+    kprintf("IDT loaded\n");
+
+    // Exception test: uncomment to trigger a page fault and see the register dump.
+    // *reinterpret_cast<volatile int*>(0xdeadbeef) = 1;
+
+    kprintf("kernel idle.\n");
     halt();
 }
 

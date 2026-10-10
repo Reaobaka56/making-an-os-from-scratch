@@ -1,4 +1,3 @@
-
 ; Kernel entry. Limine hands over control in 64-bit long mode, paging on.
 bits 64
 

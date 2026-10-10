@@ -7,15 +7,17 @@ CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -ffreestanding -fno-exceptions -fno-rtt
             -mno-80387 -mno-mmx -mno-sse -mno-sse2 -m64
 LDFLAGS  := -nostdlib -static -z max-page-size=0x1000 -T linker.ld
 
-OBJS := $(BUILD)/entry.o $(BUILD)/main.o
+CPP_SRCS := $(wildcard karnel/*.cpp)
+ASM_SRCS := $(wildcard karnel/*.asm)
+OBJS := $(patsubst karnel/%.cpp,$(BUILD)/%.o,$(CPP_SRCS)) $(patsubst karnel/%.asm,$(BUILD)/%_asm.o,$(ASM_SRCS))
 
 all: $(BUILD)/kernel.elf
 
-$(BUILD)/entry.o: karnel/entry.asm
+$(BUILD)/%_asm.o: karnel/%.asm
 	@mkdir -p $(BUILD)
 	$(NASM) -f elf64 $< -o $@
 
-$(BUILD)/main.o: karnel/main.cpp
+$(BUILD)/%.o: karnel/%.cpp $(wildcard karnel/*.hpp)
 	@mkdir -p $(BUILD)
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
@@ -40,7 +42,7 @@ iso: all limine-bin/limine
 	limine-bin/limine bios-install $(BUILD)/os.iso
 
 run: iso
-	qemu-system-x86_64 -m 256M -cdrom $(BUILD)/os.iso
+	qemu-system-x86_64 -m 256M -serial stdio -cdrom $(BUILD)/os.iso
 
 clean:
 	rm -rf $(BUILD)
