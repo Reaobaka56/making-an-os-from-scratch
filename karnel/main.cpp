@@ -5,6 +5,7 @@
 #include "serial.hpp"
 #include "gdt.hpp"
 #include "idt.hpp"
+#include "mm.hpp"
 
 namespace {
 
@@ -62,6 +63,9 @@ void kmain() {
     kprintf("GDT loaded\n");
     idt_init();
     kprintf("IDT loaded\n");
+
+    mm_init();
+    mm_selftest();
 
     // Exception test: uncomment to trigger a page fault and see the register dump.
     // *reinterpret_cast<volatile int*>(0xdeadbeef) = 1;

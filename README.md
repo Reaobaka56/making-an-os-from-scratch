@@ -1,7 +1,7 @@
 # making-an-os-from-scratch
 
 A minimal x86_64 kernel in C++ and NASM, booted by [Limine](https://github.com/limine-bootloader/limine).
-Currently boots, prints to the framebuffer and serial port, and has its own GDT/IDT with exception handlers.
+Currently boots, prints to the framebuffer and serial port, has its own GDT/IDT with exception handlers, a physical frame allocator, its own page tables, and a kernel heap (`new`/`delete`).
 
 ## Layout
 
@@ -15,6 +15,11 @@ karnel/gdt.*       GDT + TSS (IST1 stack for double faults)
 karnel/idt.*       IDT + exception handler (register dump)
 karnel/isr.asm     ISR stubs for all 256 vectors, gdt_load
 karnel/mem.cpp    memcpy/memset/memmove/memcmp
+karnel/limine.hpp  Limine protocol structs (memmap, HHDM, executable address)
+karnel/mm.*        mm_init (memory map, HHDM, init order) + boot self-test
+karnel/pmm.*       physical frame allocator (bitmap)
+karnel/vmm.*       4-level page tables: map/unmap/translate, W^X kernel mapping
+karnel/heap.*      kernel heap: kmalloc/kfree, operator new/delete
 linker.ld          higher-half link script (0xffffffff80000000)
 boot/limine.conf   bootloader menu entry
 Makefile           build, ISO, and QEMU targets
@@ -42,7 +47,7 @@ To test the exception handler, uncomment the null-write line in `kmain` (page fa
 
 - [x] Text console (bitmap font) and serial logging
 - [x] GDT, IDT, exception handlers
-- [ ] Memory map, physical allocator, paging, heap
+- [x] Memory map, physical allocator, paging, heap
 - [ ] APIC, timer, keyboard
 - [ ] Threads and scheduler
 - [ ] Syscalls and userspace (ELF loader)
