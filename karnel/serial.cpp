@@ -18,3 +18,5 @@ void serial_putc(char c) {
     while (!(inb(COM1 + 5) & 0x20)) {}
     outb(COM1, static_cast<uint8_t>(c));
 }
+
+int serial_getc_nb() { return (inb(COM1 + 5) & 1) ? inb(COM1) : -1; }

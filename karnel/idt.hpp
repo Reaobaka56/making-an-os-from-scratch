@@ -6,3 +6,6 @@ struct Frame {  // matches push order in isr_common
     uint64_t rip, cs, rflags, rsp, ss;
 };
 void idt_init();
+
+using IrqHandler = void (*)(Frame*);
+void idt_set_handler(int vector, IrqHandler h);

@@ -2,6 +2,7 @@
 #include "pmm.hpp"
 #include "mm.hpp"
 #include "console.hpp"
+#include "irq.hpp"
 #include <string.h>
 
 static uint64_t* bm;
@@ -44,6 +45,7 @@ void pmm_init(LimineMemmapResponse* mm) {
 }
 
 uint64_t pmm_alloc() {
+    IrqGuard guard;
     for (int pass = 0; pass < 2; pass++) {
         for (uint64_t i = g_hint; i < g_qwords; i++) {
             if (bm[i] == ~0ULL) continue;
@@ -57,6 +59,7 @@ uint64_t pmm_alloc() {
 }
 
 void pmm_free(uint64_t phys) {
+    IrqGuard guard;
     uint64_t f = phys / PAGE_SIZE;
     if (f >= g_frames || !test(f)) { kprintf("pmm: bad/double free %lx\n", phys); return; }
     clr(f); g_free++;

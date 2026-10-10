@@ -1,4 +1,4 @@
-// Minimal kernel: asks Limine for a framebuffer and paints it.
+// Kernel entry: boots Limine requests, brings up every subsystem, then becomes the idle thread.
 #include <stdint.h>
 #include <stddef.h>
 #include "console.hpp"
@@ -6,6 +6,14 @@
 #include "gdt.hpp"
 #include "idt.hpp"
 #include "mm.hpp"
+#include "apic.hpp"
+#include "kbd.hpp"
+#include "sched.hpp"
+#include "syscall.hpp"
+#include "fs.hpp"
+#include "proc.hpp"
+#include "pmm.hpp"
+#include "shell.hpp"
 
 namespace {
 
@@ -46,6 +54,35 @@ volatile FramebufferRequest fb_request = {
     for (;;) asm volatile("cli; hlt");
 }
 
+static void worker(void* arg) {
+    const char* name = static_cast<const char*>(arg);
+    for (int i = 0; i < 3; i++) {
+        kprintf("[%s] step %d at %lu ms\n", name, i, uptime_ms());
+        sleep_ms(name[0] == 'A' ? 100 : 150);
+    }
+}
+
+static void init_main(void*) {
+    // Step 6 demo: two kernel threads running concurrently.
+    Thread* a = thread_create("worker-A", worker, const_cast<char*>("A"));
+    Thread* b = thread_create("worker-B", worker, const_cast<char*>("B"));
+    while (thread_alive(a->id) || thread_alive(b->id)) sleep_ms(20);
+
+    if (fs_mounted()) {
+        // Step 7/8 demo: load an ELF from disk and run it in user mode.
+        uint64_t free_before = pmm_free_frames();
+        int pid = proc_spawn("/bin/hello");
+        if (pid > 0) {
+            while (thread_alive(pid)) sleep_ms(10);
+            kprintf("[pid %d exited with code %d, %ld frames leaked]\n", pid, thread_exit_code(pid),
+                    (long)free_before - (long)pmm_free_frames());
+        } else {
+            kprintf("could not start /bin/hello (%d)\n", pid);
+        }
+    }
+    shell_main(nullptr);
+}
+
 void kmain() {
     if (base_revision[2] != 0) halt();  // bootloader too old
     volatile FramebufferResponse* r = fb_request.response;
@@ -67,11 +104,18 @@ void kmain() {
     mm_init();
     mm_selftest();
 
-    // Exception test: uncomment to trigger a page fault and see the register dump.
-    // *reinterpret_cast<volatile int*>(0xdeadbeef) = 1;
+    apic_init();
+    kbd_init();
+    sched_init();
+    syscall_init();
+    kprintf("interrupts, scheduler and syscalls ready\n");
 
-    kprintf("kernel idle.\n");
-    halt();
+    if (fs_mount()) kprintf("fs: RaptorFS mounted, %u KiB free\n", fs_free_bytes() / 1024);
+    else kprintf("fs: no disk or filesystem found (attach one with -drive)\n");
+
+    thread_create("init", init_main, nullptr);
+    asm volatile("sti");
+    for (;;) asm volatile("hlt");       // idle thread
 }
 
 }  // extern "C"

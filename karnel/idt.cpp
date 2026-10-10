@@ -1,10 +1,13 @@
 #include "idt.hpp"
 #include "console.hpp"
+#include "apic.hpp"
+#include "sched.hpp"
 
 namespace {
 struct Gate { uint16_t lo, sel; uint8_t ist, attr; uint16_t mid; uint32_t hi, r; } __attribute__((packed));
 struct Idtr { uint16_t size; uint64_t base; } __attribute__((packed));
 Gate idt[256];
+IrqHandler handlers[256];
 
 const char* names[32] = {
     "Divide error", "Debug", "NMI", "Breakpoint", "Overflow", "Bound range", "Invalid opcode",
@@ -16,7 +19,14 @@ const char* names[32] = {
 
 extern "C" uint64_t isr_table[256];
 
+void idt_set_handler(int v, IrqHandler h) { handlers[v] = h; }
+
 extern "C" void isr_handler(Frame* f) {
+    if (f->vector >= 32) {                       // hardware interrupt
+        if (f->vector != VEC_SPURIOUS) lapic_eoi();
+        if (handlers[f->vector]) handlers[f->vector](f);
+        return;
+    }
     kprintf("\n*** EXCEPTION %lu: %s ***\n", f->vector, f->vector < 32 ? names[f->vector] : "?");
     kprintf("err=%lx rip=%lx cs=%lx rflags=%lx rsp=%lx\n", f->error, f->rip, f->cs, f->rflags, f->rsp);
     kprintf("rax=%lx rbx=%lx rcx=%lx rdx=%lx\nrsi=%lx rdi=%lx rbp=%lx\n",
@@ -24,6 +34,10 @@ extern "C" void isr_handler(Frame* f) {
     if (f->vector == 14) {
         uint64_t cr2; asm volatile("mov %%cr2, %0" : "=r"(cr2));
         kprintf("cr2=%lx\n", cr2);
+    }
+    if ((f->cs & 3) == 3) {                      // fault in user mode: kill the process, keep running
+        kprintf("process killed\n");
+        thread_exit(-1);
     }
     for (;;) asm volatile("cli; hlt");
 }

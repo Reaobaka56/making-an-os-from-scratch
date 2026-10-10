@@ -37,3 +37,5 @@ void gdt_init() {
     Gdtr g{sizeof(Table) - 1, reinterpret_cast<uint64_t>(&table)};
     gdt_load(&g);
 }
+
+void gdt_set_rsp0(uint64_t rsp0) { tss.rsp[0] = rsp0; }

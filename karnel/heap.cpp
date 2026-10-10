@@ -3,6 +3,7 @@
 #include "pmm.hpp"
 #include "vmm.hpp"
 #include "console.hpp"
+#include "irq.hpp"
 
 namespace {
 constexpr uint64_t HEAP_BASE = 0xffffa00000000000ULL;
@@ -44,6 +45,7 @@ void coalesce() {
 void heap_init() { grow(0); }
 
 void* kmalloc(size_t n) {
+    IrqGuard guard;
     n = n ? (n + 15) & ~size_t(15) : 16;
     for (int attempt = 0; attempt < 2; attempt++) {
         for (Block* b = head; b; b = b->next) {
@@ -65,13 +67,14 @@ void* kmalloc(size_t n) {
 
 void kfree(void* p) {
     if (!p) return;
+    IrqGuard guard;
     auto* b = reinterpret_cast<Block*>(static_cast<uint8_t*>(p) - HDR);
     if (b->magic != MAGIC || b->free) { kprintf("heap: bad/double free %p\n", p); return; }
     b->free = 1;
     coalesce();
 }
 
-size_t heap_free_blocks() { size_t n = 0; for (Block* b = head; b; b = b->next) if (b->free) n++; return n; }
+size_t heap_free_blocks() { IrqGuard guard; size_t n = 0; for (Block* b = head; b; b = b->next) if (b->free) n++; return n; }
 size_t heap_bytes_mapped() { return heap_end - HEAP_BASE; }
 
 void* operator new(size_t n) { void* p = kmalloc(n); if (!p) { kprintf("OOM\n"); for (;;) asm volatile("cli; hlt"); } return p; }
