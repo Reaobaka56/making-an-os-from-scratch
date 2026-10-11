@@ -39,10 +39,20 @@ void console_init(void* fb, uint64_t w, uint64_t h, uint64_t pitch) {
     }
 }
 
+static int g_esc;   // 0 = normal, 1 = saw ESC, 2 = inside CSI
+
 void kputc(char c) {
     IrqGuard guard;
     serial_putc(c);
     if (!g_fb) return;
+    if (g_esc == 1) { g_esc = (c == '[') ? 2 : 0; return; }
+    if (g_esc == 2) {
+        if (c == 'J') console_clear();
+        else if (c == 'H') g_col = g_row = 0;
+        if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')) g_esc = 0;
+        return;
+    }
+    if (c == 27) { g_esc = 1; return; }
     if (c == '\n') { g_col = 0; g_row++; }
     else if (c == '\r') { g_col = 0; }
     else if (c == '\b') { if (g_col) g_col--; }

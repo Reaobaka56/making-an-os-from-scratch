@@ -1,30 +1,27 @@
-#include "sys.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
-void _start(void) {
-    print("Hello from userspace! pid=");
-    printnum(sys_getpid());
-    print("\n");
+int main(int argc, char** argv) {
+    printf("Hello from userspace! pid=%d, %d argument(s):", getpid(), argc);
+    for (int i = 0; i < argc; i++) printf(" [%s]", argv[i]);
+    printf("\n");
 
-    i64 fd = sys_open("/etc/motd");
-    if (fd >= 0) {
-        char buf[128];
-        i64 n;
-        while ((n = sys_read(fd, buf, sizeof buf)) > 0) sys_write(1, buf, n);
-        sys_close(fd);
+    FILE* f = fopen("/etc/motd", "r");
+    if (f) {
+        char line[128];
+        while (fgets(line, sizeof line, f)) fputs(line, stdout);
+        fclose(f);
     } else {
-        print("motd missing\n");
+        puts("motd missing");
     }
 
-    i64 bad = sys_write(1, (const char*)0x1234, 5);   // kernel must reject this, not crash
-    print("write to a bad pointer returned ");
-    printnum(bad);
-    print("\n");
+    long bad = write(1, (const char*)0x1234, 5);        // the kernel must reject this, not crash
+    printf("write to a bad pointer returned %ld\n", bad);
 
-    for (int i = 0; i < 3; i++) {
-        print("uptime ms: ");
-        printnum(sys_uptime());
-        print("\n");
-        sys_sleep(50);
-    }
-    sys_exit(42);
+    char* p = malloc(100);
+    snprintf(p, 100, "malloc works (%d bytes at %p)", 100, (void*)p);
+    puts(p);
+    free(p);
+    return 42;
 }

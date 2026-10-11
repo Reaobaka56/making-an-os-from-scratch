@@ -11,9 +11,13 @@ CPP_SRCS := $(wildcard karnel/*.cpp)
 ASM_SRCS := $(wildcard karnel/*.asm)
 OBJS := $(patsubst karnel/%.cpp,$(BUILD)/%.o,$(CPP_SRCS)) $(patsubst karnel/%.asm,$(BUILD)/%_asm.o,$(ASM_SRCS))
 
-USER_CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-pic -fno-pie -fno-stack-protector -mgeneral-regs-only -Wall -Wextra
-USER_PROGS  := hello fault
-USER_ELFS   := $(patsubst %,$(BUILD)/user/%.elf,$(USER_PROGS))
+USER_CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
+               -fno-tree-loop-distribute-patterns -mgeneral-regs-only -Wall -Wextra \
+               -nostdinc -isystem $(shell gcc -print-file-name=include) -Iuser/include
+USER_PROGS  := sh ls cat echo write rm ps mem uptime clear hello fault
+TEST_PROGS  := selftest
+USER_ELFS   := $(patsubst %,$(BUILD)/user/%.elf,$(USER_PROGS) $(TEST_PROGS))
+LIBC_OBJS   := $(patsubst user/libc/%.c,$(BUILD)/user/lib/%.o,$(wildcard user/libc/*.c))
 
 all: $(BUILD)/kernel.elf
 
@@ -28,17 +32,39 @@ $(BUILD)/%.o: karnel/%.cpp $(wildcard karnel/*.hpp)
 $(BUILD)/kernel.elf: $(OBJS) linker.ld
 	ld $(LDFLAGS) $(OBJS) -o $@
 
-# User programs (static ELF, linked at 0x400000)
-$(BUILD)/user/%.elf: user/%.c user/sys.h user/linker.ld
-	@mkdir -p $(BUILD)/user
-	gcc $(USER_CFLAGS) -nostdlib -static -no-pie -Wl,-T,user/linker.ld -Wl,--build-id=none -o $@ $<
+# User-space libc and programs (static ELF, linked at 0x400000)
+$(BUILD)/user/lib/%.o: user/libc/%.c $(wildcard user/include/*.h)
+	@mkdir -p $(BUILD)/user/lib
+	gcc $(USER_CFLAGS) -c $< -o $@
 
-# Disk image: everything under rootfs/ plus the user programs in /bin
+$(BUILD)/user/lib/crt0.o: user/libc/crt0.S
+	@mkdir -p $(BUILD)/user/lib
+	gcc -c $< -o $@
+
+$(BUILD)/user/libc.a: $(LIBC_OBJS)
+	ar rcs $@ $^
+
+USER_LINK = gcc $(USER_CFLAGS) -nostdlib -static -no-pie -Wl,-T,user/linker.ld -Wl,--build-id=none \
+            $(BUILD)/user/lib/crt0.o $< $(BUILD)/user/libc.a
+
+$(BUILD)/user/%.elf: user/%.c $(BUILD)/user/libc.a $(BUILD)/user/lib/crt0.o user/linker.ld $(wildcard user/include/*.h)
+	@mkdir -p $(BUILD)/user
+	$(USER_LINK) -o $@
+
+$(BUILD)/user/%.elf: tests/user/%.c $(BUILD)/user/libc.a $(BUILD)/user/lib/crt0.o user/linker.ld $(wildcard user/include/*.h)
+	@mkdir -p $(BUILD)/user
+	$(USER_LINK) -o $@
+
+# Disk image: everything under rootfs/ plus the programs in /bin
 $(BUILD)/disk.img: tools/mkfs.py $(USER_ELFS) $(shell find rootfs -type f)
 	@mkdir -p $(BUILD)
-	python3 tools/mkfs.py $@ 8 rootfs $(foreach p,$(USER_PROGS),/bin/$(p)=$(BUILD)/user/$(p).elf)
+	python3 tools/mkfs.py $@ 8 rootfs $(foreach p,$(USER_PROGS) $(TEST_PROGS),/bin/$(p)=$(BUILD)/user/$(p).elf)
 
 disk: $(BUILD)/disk.img
+
+# Automated tests: boots the OS headless in QEMU and checks its behaviour (see tests/README.md)
+test: iso disk
+	python3 tests/run_tests.py
 
 # Bootable ISO (needs xorriso; fetches Limine binaries on first run)
 limine-bin/limine:
@@ -63,4 +89,4 @@ run: iso $(BUILD)/disk.img
 clean:
 	rm -rf $(BUILD)
 
-.PHONY: all iso run clean disk
+.PHONY: all iso run clean disk test

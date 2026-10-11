@@ -21,6 +21,8 @@ uint64_t vmm_kernel_root();
 uint64_t vmm_current_root();
 uint64_t vmm_create_space();                                  // returns PML4 physical address, 0 on OOM
 void     vmm_destroy_space(uint64_t root);                    // frees user-half tables and frames
+uint64_t vmm_clone_space(uint64_t src_root);                  // deep copy of the user half (fork)
+bool     vmm_unmap_in(uint64_t root, uint64_t virt, uint64_t* phys);   // clears the PTE, returns the frame
 bool     vmm_map_in(uint64_t root, uint64_t virt, uint64_t phys, uint64_t flags);
 bool     vmm_translate_in(uint64_t root, uint64_t virt, uint64_t* phys);
 void     vmm_switch(uint64_t root);

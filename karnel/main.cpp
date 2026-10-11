@@ -69,17 +69,27 @@ static void init_main(void*) {
     while (thread_alive(a->id) || thread_alive(b->id)) sleep_ms(20);
 
     if (fs_mounted()) {
-        // Step 7/8 demo: load an ELF from disk and run it in user mode.
+        // Boot demo: run /bin/hello (with arguments) in user mode and check nothing leaks.
         uint64_t free_before = pmm_free_frames();
-        int pid = proc_spawn("/bin/hello");
+        char* args[] = {const_cast<char*>("hello"), const_cast<char*>("from"), const_cast<char*>("the"), const_cast<char*>("kernel")};
+        int pid = proc_spawn("/bin/hello", 4, args);
         if (pid > 0) {
-            while (thread_alive(pid)) sleep_ms(10);
-            kprintf("[pid %d exited with code %d, %ld frames leaked]\n", pid, thread_exit_code(pid),
+            int status = 0;
+            proc_wait(pid, &status);
+            kprintf("[pid %d exited with code %d, %ld frames leaked]\n", pid, status,
                     (long)free_before - (long)pmm_free_frames());
         } else {
             kprintf("could not start /bin/hello (%d)\n", pid);
         }
+        // Hand over to the user-space shell; restart it if it exits.
+        while (fs_find("/bin/sh") >= 0) {
+            int sh = proc_spawn("/bin/sh");
+            if (sh < 0) break;
+            proc_wait(sh, nullptr);
+            kprintf("[shell exited, restarting]\n");
+        }
     }
+    kprintf("no user shell available, starting the built-in one\n");
     shell_main(nullptr);
 }
 

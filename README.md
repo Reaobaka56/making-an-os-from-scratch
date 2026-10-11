@@ -2,7 +2,7 @@
 
 A small x86_64 operating system in C++ and NASM, booted by [Limine](https://github.com/limine-bootloader/limine).
 It has interrupts, a preemptive scheduler, virtual memory, user-mode processes loaded from ELF files,
-a disk driver, a filesystem and an interactive shell.
+a disk driver, a filesystem, a small C library and a user-mode shell.
 
 ## What works
 
@@ -13,11 +13,13 @@ a disk driver, a filesystem and an interactive shell.
 | Memory | Bitmap frame allocator, own 4-level page tables (W^X kernel, NX), kernel heap with `new`/`delete` |
 | Interrupts | LAPIC timer (PIT-calibrated, 100 Hz), IOAPIC, PS/2 keyboard, legacy PIC disabled |
 | Scheduling | Kernel threads, preemptive round-robin, `sleep_ms`, interrupt-safe heap/allocators |
-| Userspace | Per-process address spaces, `syscall`/`sysret`, ELF64 loader, user-pointer validation |
+| Userspace | Per-process address spaces, `syscall`/`sysret`, ELF64 loader, `argv`, user-pointer validation |
+| Processes | `fork` (full address-space copy), `exec`, `wait`/`waitpid`, `spawn`, `brk`, anonymous `mmap`/`munmap` |
+| User libc | `printf` family, `malloc`/`free`/`realloc`/`calloc` (brk + mmap), string/ctype, `FILE` I/O (`fopen`/`fgets`/`fprintf`...) |
 | Storage | ATA PIO driver, RaptorFS (flat named files, contiguous extents), `tools/mkfs.py` |
-| Shell | `ls cat write rm run ps mem df uptime echo clear help`; input from keyboard or serial |
+| Shell | `/bin/sh` runs in user mode (fork+exec+wait, `&` for background jobs); programs: `ls cat echo write rm ps mem uptime clear hello fault`. A built-in kernel shell is the fallback if no disk is present |
 
-Syscalls: `write read open close exit getpid yield sleep uptime spawn` (see `karnel/syscall.hpp`).
+Syscalls (see `karnel/syscall.hpp`): `write read open close exit getpid yield sleep uptime spawn fork exec wait brk mmap munmap unlink readdir ps meminfo`.
 
 ## Layout
 
@@ -39,11 +41,14 @@ karnel/kbd.*        PS/2 keyboard
 karnel/sched.*      threads and scheduler (sched.asm: context switch, usermode entry)
 karnel/syscall.*    syscall setup and dispatch (syscall.asm: entry stub)
 karnel/elf.*        ELF64 loader
-karnel/proc.*       spawn a user process from a file
+karnel/proc.*       build a process image (ELF + argv) and spawn/wait
 karnel/ata.*        ATA PIO driver
 karnel/fs.*         RaptorFS
 karnel/shell.*      interactive shell
-user/               user programs (hello, fault) + tiny syscall header + linker script
+user/               user programs (sh, ls, cat, echo, write, rm, ps, mem, uptime, clear, hello, fault)
+user/libc/          the C library (crt0, stdio, stdlib, string, syscall wrappers)
+user/include/       libc headers
+tests/              end-to-end test runner (tests/run_tests.py) and user-space test suite (tests/user/)
 rootfs/             files copied into the disk image
 tools/mkfs.py       builds the disk image
 linker.ld           kernel link script (higher half, 0xffffffff80000000)
@@ -63,6 +68,7 @@ make          # build/kernel.elf
 make disk     # build/disk.img (user programs + rootfs/)
 make iso      # build/os.iso (clones Limine v8.x-binary into limine-bin/ on first run)
 make run      # boot in QEMU with the disk attached; serial is your terminal
+make test     # boot the OS in QEMU and run all tests (see tests/README.md)
 make clean
 ```
 
@@ -70,12 +76,14 @@ In `make run` you can type in the QEMU window (PS/2 keyboard) or in the terminal
 Try:
 
 ```
-os> ls
-os> cat /README.txt
-os> run /bin/hello
-os> run /bin/fault
-os> write /notes.txt hello
-os> ps
+os$ ls
+os$ cat /README.txt
+os$ hello a b c
+os$ fault
+os$ write /notes.txt hello world
+os$ sleepy-job &      (any program followed by & runs in the background)
+os$ ps
+os$ selftest
 ```
 
 The disk image persists across boots; delete `build/disk.img` to reset it.
@@ -83,7 +91,7 @@ The disk image persists across boots; delete `build/disk.img` to reset it.
 ## Limitations / next ideas
 
 - Single CPU only (no SMP); the IOAPIC is assumed at the standard address instead of parsing ACPI.
-- RaptorFS is flat (no directories), reuses space only when a file is rewritten in place, and holds 64 files.
+- `fork` copies every page (no copy-on-write); there are no signals, pipes, redirection or environment variables.
+- RaptorFS is flat (no directories), reuses space only when a file is rewritten in place, holds 64 files, and a written file is committed when closed.
 - ATA PIO is slow; AHCI or virtio-blk would be the next driver.
-- User processes have no argv/environment, no fork/exec, no signals, and no dynamic memory syscall yet.
-- Possible next steps: `brk`/`mmap`, argv, a user-space libc, pipes, ACPI, PCI enumeration, networking.
+- Possible next steps: copy-on-write fork, pipes and `dup2`, a directory-aware filesystem, ACPI + PCI enumeration, networking.

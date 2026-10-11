@@ -133,6 +133,46 @@ void vmm_destroy_space(uint64_t root) {
     free_level(root, 4, true);
 }
 
+uint64_t vmm_clone_space(uint64_t src) {
+    IrqGuard guard;
+    uint64_t dst = vmm_create_space();
+    if (!dst) return 0;
+    uint64_t* l4 = tbl(src);
+    for (uint64_t i4 = 0; i4 < 256; i4++) {
+        if (!(l4[i4] & VMM_PRESENT)) continue;
+        uint64_t* l3 = tbl(l4[i4] & ADDR);
+        for (uint64_t i3 = 0; i3 < 512; i3++) {
+            if (!(l3[i3] & VMM_PRESENT) || (l3[i3] & HUGE)) continue;
+            uint64_t* l2 = tbl(l3[i3] & ADDR);
+            for (uint64_t i2 = 0; i2 < 512; i2++) {
+                if (!(l2[i2] & VMM_PRESENT) || (l2[i2] & HUGE)) continue;
+                uint64_t* l1 = tbl(l2[i2] & ADDR);
+                for (uint64_t i1 = 0; i1 < 512; i1++) {
+                    if (!(l1[i1] & VMM_PRESENT)) continue;
+                    uint64_t virt = (i4 << 39) | (i3 << 30) | (i2 << 21) | (i1 << 12);
+                    uint64_t nf = pmm_alloc();
+                    if (!nf) { vmm_destroy_space(dst); return 0; }
+                    memcpy(tbl(nf), tbl(l1[i1] & ADDR), PAGE_SIZE);
+                    if (!vmm_map_in(dst, virt, nf, l1[i1] & (VMM_WRITE | VMM_USER | VMM_NX))) {
+                        pmm_free(nf); vmm_destroy_space(dst); return 0;
+                    }
+                }
+            }
+        }
+    }
+    return dst;
+}
+
+bool vmm_unmap_in(uint64_t root, uint64_t virt, uint64_t* phys) {
+    IrqGuard guard;
+    uint64_t* pte = pte_for(root, virt, false);
+    if (!pte || !(*pte & VMM_PRESENT)) return false;
+    if (phys) *phys = *pte & ADDR;
+    *pte = 0;
+    if (root == vmm_current_root()) asm volatile("invlpg (%0)" :: "r"(virt) : "memory");
+    return true;
+}
+
 bool vmm_map_in(uint64_t root, uint64_t virt, uint64_t phys, uint64_t flags) {
     IrqGuard guard;
     uint64_t* pte = pte_for(root, virt, true);

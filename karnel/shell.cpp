@@ -35,8 +35,9 @@ int split(char* line, char** argv, int max) {
 void run_program(const char* path) {
     int pid = proc_spawn(path);
     if (pid < 0) { kprintf("run: cannot start %s (error %d)\n", path, pid); return; }
-    while (thread_alive(pid)) sleep_ms(10);
-    kprintf("[pid %d exited with code %d]\n", pid, thread_exit_code(pid));
+    int status = 0;
+    proc_wait(pid, &status);
+    kprintf("[pid %d exited with code %d]\n", pid, status);
 }
 
 void cmd_cat(const char* path) {

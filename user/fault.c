@@ -1,8 +1,8 @@
-#include "sys.h"
+#include <stdio.h>
 
-void _start(void) {
-    print("about to dereference NULL...\n");
+int main(void) {
+    puts("about to dereference NULL...");
     *(volatile int*)0 = 1;
-    print("unreachable\n");
-    sys_exit(0);
+    puts("unreachable");
+    return 0;
 }

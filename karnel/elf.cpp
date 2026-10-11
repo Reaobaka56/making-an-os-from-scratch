@@ -15,7 +15,7 @@ struct Phdr { uint32_t type, flags; uint64_t offset, vaddr, paddr, filesz, memsz
 constexpr uint32_t PT_LOAD = 1, PF_X = 1, PF_W = 2;
 }
 
-bool elf_load(uint64_t root, const uint8_t* img, uint64_t size, uint64_t* entry) {
+bool elf_load(uint64_t root, const uint8_t* img, uint64_t size, uint64_t* entry, uint64_t* image_end) {
     if (size < sizeof(Ehdr)) return false;
     auto* eh = reinterpret_cast<const Ehdr*>(img);
     if (memcmp(eh->ident, "\x7f""ELF", 4) != 0 || eh->ident[4] != 2 || eh->machine != 62 || eh->type != 2) {
@@ -24,6 +24,7 @@ bool elf_load(uint64_t root, const uint8_t* img, uint64_t size, uint64_t* entry)
     }
     if (eh->phentsize != sizeof(Phdr) || eh->phoff + uint64_t(eh->phnum) * sizeof(Phdr) > size) return false;
 
+    uint64_t top = 0;
     for (unsigned i = 0; i < eh->phnum; i++) {
         auto* ph = reinterpret_cast<const Phdr*>(img + eh->phoff + i * sizeof(Phdr));
         if (ph->type != PT_LOAD || ph->memsz == 0) continue;
@@ -33,6 +34,7 @@ bool elf_load(uint64_t root, const uint8_t* img, uint64_t size, uint64_t* entry)
         uint64_t flags = VMM_USER | ((ph->flags & PF_W) ? VMM_WRITE : 0) | ((ph->flags & PF_X) ? 0 : VMM_NX);
         uint64_t start = ph->vaddr & ~(PAGE_SIZE - 1);
         uint64_t end = (ph->vaddr + ph->memsz + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1);
+        if (end > top) top = end;
         for (uint64_t page = start; page < end; page += PAGE_SIZE) {
             uint64_t existing;
             uint64_t frame;
@@ -53,5 +55,6 @@ bool elf_load(uint64_t root, const uint8_t* img, uint64_t size, uint64_t* entry)
         }
     }
     *entry = eh->entry;
+    *image_end = top;
     return true;
 }
