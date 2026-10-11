@@ -14,7 +14,7 @@ OBJS := $(patsubst karnel/%.cpp,$(BUILD)/%.o,$(CPP_SRCS)) $(patsubst karnel/%.as
 USER_CFLAGS := -std=gnu11 -O2 -ffreestanding -fno-builtin -fno-stack-protector -fno-pic -fno-pie \
                -fno-tree-loop-distribute-patterns -mgeneral-regs-only -Wall -Wextra \
                -nostdinc -isystem $(shell gcc -print-file-name=include) -Iuser/include
-USER_PROGS  := sh ls cat echo write rm ps mem uptime clear hello fault
+USER_PROGS  := sh ls cat echo write rm ps mem uptime clear wc grep hello fault
 TEST_PROGS  := selftest
 USER_ELFS   := $(patsubst %,$(BUILD)/user/%.elf,$(USER_PROGS) $(TEST_PROGS))
 LIBC_OBJS   := $(patsubst user/libc/%.c,$(BUILD)/user/lib/%.o,$(wildcard user/libc/*.c))

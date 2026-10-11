@@ -6,6 +6,7 @@
 #include "fs.hpp"
 #include "heap.hpp"
 #include "irq.hpp"
+#include "fdtable.hpp"
 #include "proc.hpp"
 #include "kbd.hpp"
 #include "serial.hpp"
@@ -37,7 +38,6 @@ namespace {
 constexpr uint64_t MMAP_BASE = 0x0000600000000000ULL;
 constexpr uint64_t MMAP_LIMIT = 0x00007f0000000000ULL;
 constexpr uint64_t BRK_MAX = 256ULL << 20;
-constexpr uint32_t WBUF_MAX = 1u << 20;
 constexpr int ARGV_MAX = 16, ARG_LEN = 128;
 
 bool copy_user_str(char* dst, uint64_t src, size_t max) {
@@ -87,40 +87,21 @@ void free_range(uint64_t root, uint64_t from, uint64_t to) {
 int64_t sys_open(Thread* t, uint64_t upath, uint64_t flags) {
     char path[48];
     if (!copy_user_str(path, upath, sizeof path)) return -1;
-    int fd = 3;
-    while (fd < MAX_FDS && t->files[fd].used) fd++;
-    if (fd == MAX_FDS) return -3;
+    int fd = fd_alloc(t);
+    if (fd < 0) return -3;
     OpenFile& f = t->files[fd];
     memset(&f, 0, sizeof f);
     if (flags & 1) {
-        f.writable = true;
-        strncpy(f.name, path, sizeof f.name - 1);
-        f.wcap = 512;
-        f.wbuf = static_cast<uint8_t*>(kmalloc(f.wcap));
-        if (!f.wbuf) return -4;
+        f.wfile = wfile_create(path);
+        if (!f.wfile) return -4;
+        f.kind = FD_WFILE;
     } else {
         int idx = fs_find(path);
         if (idx < 0) return -2;
+        f.kind = FD_FILE;
         f.index = idx;
     }
-    f.used = true;
     return fd;
-}
-
-int64_t sys_write_file(OpenFile& f, const uint8_t* p, uint64_t n) {
-    if (f.wlen + n > WBUF_MAX) return -1;
-    if (f.wlen + n > f.wcap) {
-        uint32_t cap = f.wcap;
-        while (cap < f.wlen + n) cap *= 2;
-        auto* nb = static_cast<uint8_t*>(kmalloc(cap));
-        if (!nb) return -1;
-        memcpy(nb, f.wbuf, f.wlen);
-        kfree(f.wbuf);
-        f.wbuf = nb; f.wcap = cap;
-    }
-    memcpy(f.wbuf + f.wlen, p, n);
-    f.wlen += n;
-    return n;
 }
 }  // namespace
 
@@ -129,32 +110,44 @@ extern "C" int64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint6
     switch (nr) {
     case SYS_WRITE: {
         if (!vmm_user_ok(a2, a3, false)) return -1;
+        if (a1 >= MAX_FDS) return -1;
+        OpenFile& f = t->files[a1];
         auto* p = reinterpret_cast<const char*>(a2);
-        if (a1 == 1 || a1 == 2) { for (uint64_t i = 0; i < a3; i++) kputc(p[i]); return a3; }
-        if (a1 < 3 || a1 >= MAX_FDS || !t->files[a1].used || !t->files[a1].writable) return -1;
-        return sys_write_file(t->files[a1], reinterpret_cast<const uint8_t*>(p), a3);
+        switch (f.kind) {
+        case FD_CONSOLE_OUT: for (uint64_t i = 0; i < a3; i++) kputc(p[i]); return a3;
+        case FD_PIPE_W:      return pipe_write(f.pipe, p, a3);
+        case FD_WFILE:       return wfile_write(f.wfile, p, a3);
+        default:             return -1;
+        }
     }
     case SYS_READ: {
         if (!vmm_user_ok(a2, a3, true)) return -1;
-        auto* p = reinterpret_cast<char*>(a2);
-        if (a1 == 0) { if (a3 == 0) return 0; p[0] = static_cast<char>(input_getc()); return 1; }
-        if (a1 < 3 || a1 >= MAX_FDS || !t->files[a1].used || t->files[a1].writable) return -1;
+        if (a1 >= MAX_FDS) return -1;
         OpenFile& f = t->files[a1];
-        int64_t n = fs_read(f.index, f.pos, p, a3);
-        if (n > 0) f.pos += n;
-        return n;
+        auto* p = reinterpret_cast<char*>(a2);
+        switch (f.kind) {
+        case FD_CONSOLE_IN: {
+            if (a3 == 0) return 0;
+            int c = input_getc();
+            if (c == 4) return 0;                     // ctrl-D = end of input
+            p[0] = static_cast<char>(c);
+            return 1;
+        }
+        case FD_PIPE_R: return pipe_read(f.pipe, p, a3);
+        case FD_FILE: {
+            int64_t n = fs_read(f.index, f.pos, p, a3);
+            if (n > 0) f.pos += n;
+            return n;
+        }
+        default: return -1;
+        }
     }
     case SYS_OPEN:  return sys_open(t, a1, a2);
-    case SYS_CLOSE: {
-        if (a1 < 3 || a1 >= MAX_FDS || !t->files[a1].used) return -1;
-        OpenFile& f = t->files[a1];
-        bool ok = true;
-        if (f.writable) { ok = fs_write(f.name, f.wbuf, f.wlen); kfree(f.wbuf); }
-        memset(&f, 0, sizeof f);
-        return ok ? 0 : -1;
-    }
+    case SYS_CLOSE:
+        if (a1 >= MAX_FDS || t->files[a1].kind == FD_NONE) return -1;
+        return fd_release(t->files[a1], true) ? 0 : -1;
     case SYS_EXIT:
-        close_all_files(t);
+        fd_close_all(t, true);
         thread_exit(static_cast<int>(a1));
     case SYS_GETPID: return t->id;
     case SYS_YIELD:  yield(); return 0;
@@ -259,6 +252,34 @@ extern "C" int64_t syscall_dispatch(uint64_t nr, uint64_t a1, uint64_t a2, uint6
         m->free_frames = pmm_free_frames(); m->total_frames = pmm_total_frames();
         m->heap_kib = heap_bytes_mapped() / 1024; m->disk_free_kib = fs_free_bytes() / 1024;
         m->uptime_ms = uptime_ms(); m->threads = thread_count();
+        return 0;
+    }
+    case SYS_DUP: {
+        if (a1 >= MAX_FDS || t->files[a1].kind == FD_NONE) return -1;
+        int fd = fd_alloc(t);
+        if (fd < 0) return -1;
+        fd_dup_into(t->files[fd], t->files[a1]);
+        return fd;
+    }
+    case SYS_DUP2: {
+        if (a1 >= MAX_FDS || a2 >= MAX_FDS || t->files[a1].kind == FD_NONE) return -1;
+        if (a1 == a2) return a2;
+        if (t->files[a2].kind != FD_NONE) fd_release(t->files[a2], true);
+        fd_dup_into(t->files[a2], t->files[a1]);
+        return a2;
+    }
+    case SYS_PIPE: {
+        if (!vmm_user_ok(a1, 2 * sizeof(int), true)) return -1;
+        int r = fd_alloc(t);
+        if (r < 0) return -1;
+        t->files[r].kind = FD_PIPE_R;                 // reserve so the second alloc differs
+        int w = fd_alloc(t);
+        if (w < 0) { t->files[r].kind = FD_NONE; return -1; }
+        Pipe* p = pipe_create();
+        if (!p) { t->files[r].kind = FD_NONE; return -1; }
+        t->files[r].pipe = p; t->files[w].kind = FD_PIPE_W; t->files[w].pipe = p;
+        auto* out = reinterpret_cast<int*>(a1);
+        out[0] = r; out[1] = w;
         return 0;
     }
     default: return -38;

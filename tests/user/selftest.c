@@ -1,4 +1,4 @@
-// User-space test suite: exercises libc, brk/mmap, fork/exec/wait, argv and the filesystem.
+// User-space test suite: exercises libc, brk/mmap, fork/exec/wait, argv, pipes, dup2 and the filesystem.
 // Prints one PASS/FAIL line per check and "SELFTEST DONE failures=N"; exits with the failure count.
 #include <stdio.h>
 #include <stdlib.h>
@@ -149,6 +149,71 @@ static void test_files(void) {
     check("open of a missing file fails", open("/nope", O_RDONLY) < 0);
 }
 
+static void test_pipes(void) {
+    int fds[2];
+    check("pipe() creates a pair", pipe(fds) == 0 && fds[0] >= 3 && fds[1] > fds[0]);
+    check("write to the pipe", write(fds[1], "ping", 4) == 4);
+    char buf[16] = {0};
+    check("read it back from the other end", read(fds[0], buf, sizeof buf) == 4 && !strcmp(buf, "ping"));
+    close(fds[1]);
+    check("EOF once the writer is closed", read(fds[0], buf, sizeof buf) == 0);
+    close(fds[0]);
+
+    pipe(fds);
+    close(fds[0]);
+    check("write with no readers fails", write(fds[1], "x", 1) < 0);
+    close(fds[1]);
+
+    // Parent -> child through a pipe, more data than the 4 KiB pipe buffer holds (forces blocking).
+    pipe(fds);
+    int pid = fork();
+    if (pid == 0) {
+        close(fds[1]);
+        long sum = 0, total = 0; unsigned char chunk[300]; long n;
+        while ((n = read(fds[0], chunk, sizeof chunk)) > 0) { for (long i = 0; i < n; i++) sum += chunk[i]; total += n; }
+        exit(total == 20000 && sum == 20000L * 7 ? 0 : 1);
+    }
+    close(fds[0]);
+    unsigned char block[500];
+    memset(block, 7, sizeof block);
+    int ok = 1;
+    for (int i = 0; i < 40; i++) ok &= write(fds[1], block, sizeof block) == (long)sizeof block;
+    close(fds[1]);
+    int status = -1;
+    waitpid(pid, &status, 0);
+    check("20000 bytes through a 4 KiB pipe, intact", ok && status == 0);
+
+    // dup2 redirects stdout into a pipe: a child's printf lands in the parent's read end.
+    pipe(fds);
+    pid = fork();
+    if (pid == 0) { dup2(fds[1], 1); close(fds[0]); close(fds[1]); printf("redirected\n"); exit(0); }
+    close(fds[1]);
+    char out[32] = {0};
+    long got = read(fds[0], out, sizeof out - 1);
+    close(fds[0]);
+    waitpid(pid, &status, 0);
+    check("dup2 redirects a child's stdout into a pipe", got == 11 && !strcmp(out, "redirected\n"));
+
+    int copy = dup(1);
+    check("dup returns a new descriptor", copy > 2 && copy != 1);
+    close(copy);
+    check("dup2 on a bad descriptor fails", dup2(15, 3) < 0);
+}
+
+static void test_redirect_file(void) {
+    int fd = open("/redir.tmp", O_WRONLY);
+    int pid = fork();
+    if (pid == 0) { dup2(fd, 1); close(fd); printf("into a file\n"); exit(0); }
+    close(fd);                                          // the child holds the last reference
+    int status;
+    waitpid(pid, &status, 0);
+    FILE* f = fopen("/redir.tmp", "r");
+    char line[64] = {0};
+    if (f) { fgets(line, sizeof line, f); fclose(f); }
+    check("stdout redirected to a file is committed on exit", f && !strcmp(line, "into a file\n"));
+    unlink("/redir.tmp");
+}
+
 static void test_misc(void) {
     unsigned long t0 = uptime_ms();
     msleep(50);
@@ -171,6 +236,8 @@ int main(int argc, char** argv) {
     test_fork_wait();
     test_exec();
     test_files();
+    test_pipes();
+    test_redirect_file();
     test_misc();
     printf("SELFTEST DONE failures=%d\n", failures);
     return failures;

@@ -7,12 +7,15 @@ struct SyscallFrame {
     uint64_t r15, r14, r13, r12, rbp, rbx, r10, r9, r8, rdx, rsi, rdi, r11, rcx, rsp;
 };
 
+struct Pipe;
+struct WFile;
+enum FdKind : uint8_t { FD_NONE = 0, FD_FILE, FD_CONSOLE_IN, FD_CONSOLE_OUT, FD_PIPE_R, FD_PIPE_W, FD_WFILE };
+
 struct OpenFile {
-    bool     used, writable;
-    uint32_t index, pos;
-    char     name[48];
-    uint8_t* wbuf;               // write-mode files are buffered and committed on close
-    uint32_t wlen, wcap;
+    uint8_t  kind;
+    uint32_t index, pos;         // FD_FILE: filesystem slot and read position
+    Pipe*    pipe;               // FD_PIPE_R / FD_PIPE_W
+    WFile*   wfile;              // FD_WFILE: shared write buffer, committed when the last reference closes
 };
 constexpr int MAX_FDS = 16;
 
@@ -52,7 +55,6 @@ Thread*  thread_current();
 bool     thread_alive(uint64_t id);
 int      sched_collect(uint64_t parent, int pid, int* status);   // >0 pid reaped, 0 still running, -1 no such child
 size_t   sched_snapshot(PsInfo* out, size_t max);
-void     close_all_files(Thread* t);                    // flush + release a process's descriptors
 void     sched_dump();                                  // prints the thread table
 size_t   thread_count();
 

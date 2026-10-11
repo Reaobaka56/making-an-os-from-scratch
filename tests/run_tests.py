@@ -134,7 +134,7 @@ def userspace_selftest(vm):
     out = vm.run("selftest", timeout=120)
     assert "[FAIL]" not in out, "\n".join(l for l in out.splitlines() if "FAIL" in l)
     assert "SELFTEST DONE failures=0" in out, out[-500:]
-    assert out.count("[PASS]") >= 39, f"only {out.count('[PASS]')} checks ran"
+    assert out.count("[PASS]") >= 47, f"only {out.count('[PASS]')} checks ran"
 
 
 @test
@@ -149,7 +149,7 @@ def fault_isolation(vm):
 
 @test
 def no_leaks(vm):
-    """frames are returned after processes run, fork, exec and crash"""
+    """frames are returned after processes run, fork, exec, pipelines and crashes"""
     vm.boot()
 
     def free_frames():
@@ -160,6 +160,9 @@ def no_leaks(vm):
     vm.run("selftest", timeout=120)
     vm.run("fault")
     vm.run("hello")
+    vm.run("ls | grep bin | wc")
+    vm.run("echo leak check > /leak.tmp")
+    vm.run("rm /leak.tmp")
     after = free_frames()
     assert before == after, f"leaked {before - after} frames"
 
@@ -171,6 +174,26 @@ def background_jobs(vm):
     assert "started" in vm.run("echo bg &")
     out = vm.run("ps")
     assert "idle" in out and "init" in out and "sh" in out, out
+
+
+@test
+def pipes_and_redirects(vm):
+    """shell pipelines (a | b | c) and redirection (< file, > file)"""
+    vm.boot()
+    assert vm.run("echo hello world | wc").strip() == "1 2 12"
+    out = vm.run("ls | grep bin")
+    assert "/bin/sh" in out and "/etc/motd" not in out, out
+    assert vm.run("ls | grep /bin/ | wc").strip().split()[0] == str(len(re.findall(r"/bin/", vm.run("ls"))))
+    assert vm.run("echo a | cat | cat | cat").strip() == "a"
+    vm.run("echo redirected text > /out.txt")
+    assert vm.run("cat /out.txt").strip() == "redirected text"
+    assert vm.run("cat < /out.txt | wc").strip() == "1 2 16"
+    assert vm.run("grep README < /README.txt | wc").strip().startswith("1 ")
+    assert "[exit 1]" in vm.run("echo nothing | grep zzz")
+    assert "command not found" in vm.run("echo x | nosuchprogram")
+    assert "syntax error" in vm.run("echo x |")
+    assert "cannot open" in vm.run("cat < /does-not-exist")
+    vm.run("rm /out.txt")
 
 
 @test

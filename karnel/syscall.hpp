@@ -22,6 +22,9 @@ enum Sys : uint64_t {
     SYS_READDIR = 17, // (slot, DirInfo*) -> 0 used, 1 empty slot, -1 past the end
     SYS_PS = 18,      // (PsInfo*, max) -> count
     SYS_MEMINFO = 19, // (MemInfo*)
+    SYS_DUP = 20,     // (fd) -> lowest free descriptor referring to the same object
+    SYS_DUP2 = 21,    // (old, new) -> new
+    SYS_PIPE = 22,    // (int fds[2]) fds[0] = read end, fds[1] = write end
 };
 
 struct DirInfo { char name[48]; uint32_t size; };

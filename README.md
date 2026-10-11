@@ -15,9 +15,10 @@ a disk driver, a filesystem, a small C library and a user-mode shell.
 | Scheduling | Kernel threads, preemptive round-robin, `sleep_ms`, interrupt-safe heap/allocators |
 | Userspace | Per-process address spaces, `syscall`/`sysret`, ELF64 loader, `argv`, user-pointer validation |
 | Processes | `fork` (full address-space copy), `exec`, `wait`/`waitpid`, `spawn`, `brk`, anonymous `mmap`/`munmap` |
+| Descriptors | Per-process fd table (console, files, write-mode files, pipes), reference counted: `pipe`, `dup`, `dup2`, inherited across `fork`/`exec` |
 | User libc | `printf` family, `malloc`/`free`/`realloc`/`calloc` (brk + mmap), string/ctype, `FILE` I/O (`fopen`/`fgets`/`fprintf`...) |
 | Storage | ATA PIO driver, RaptorFS (flat named files, contiguous extents), `tools/mkfs.py` |
-| Shell | `/bin/sh` runs in user mode (fork+exec+wait, `&` for background jobs); programs: `ls cat echo write rm ps mem uptime clear hello fault`. A built-in kernel shell is the fallback if no disk is present |
+| Shell | `/bin/sh` runs in user mode: pipelines (`a \| b \| c`), redirection (`<`, `>`), background jobs (`&`). Programs: `ls cat echo write rm ps mem uptime clear wc grep hello fault`. A built-in kernel shell is the fallback if no disk is present |
 
 Syscalls (see `karnel/syscall.hpp`): `write read open close exit getpid yield sleep uptime spawn fork exec wait brk mmap munmap unlink readdir ps meminfo`.
 
@@ -42,10 +43,11 @@ karnel/sched.*      threads and scheduler (sched.asm: context switch, usermode e
 karnel/syscall.*    syscall setup and dispatch (syscall.asm: entry stub)
 karnel/elf.*        ELF64 loader
 karnel/proc.*       build a process image (ELF + argv) and spawn/wait
+karnel/fdtable.*    file descriptor table, pipes, write-mode files (reference counted)
 karnel/ata.*        ATA PIO driver
 karnel/fs.*         RaptorFS
 karnel/shell.*      interactive shell
-user/               user programs (sh, ls, cat, echo, write, rm, ps, mem, uptime, clear, hello, fault)
+user/               user programs (sh, ls, cat, echo, write, rm, ps, mem, uptime, clear, wc, grep, hello, fault)
 user/libc/          the C library (crt0, stdio, stdlib, string, syscall wrappers)
 user/include/       libc headers
 tests/              end-to-end test runner (tests/run_tests.py) and user-space test suite (tests/user/)
@@ -81,6 +83,9 @@ os$ cat /README.txt
 os$ hello a b c
 os$ fault
 os$ write /notes.txt hello world
+os$ ls | grep bin | wc
+os$ echo hello > /h.txt
+os$ cat < /h.txt | wc
 os$ sleepy-job &      (any program followed by & runs in the background)
 os$ ps
 os$ selftest
@@ -91,7 +96,7 @@ The disk image persists across boots; delete `build/disk.img` to reset it.
 ## Limitations / next ideas
 
 - Single CPU only (no SMP); the IOAPIC is assumed at the standard address instead of parsing ACPI.
-- `fork` copies every page (no copy-on-write); there are no signals, pipes, redirection or environment variables.
+- `fork` copies every page (no copy-on-write); there are no signals or environment variables, and `>` truncates (no `>>` append).
 - RaptorFS is flat (no directories), reuses space only when a file is rewritten in place, holds 64 files, and a written file is committed when closed.
 - ATA PIO is slow; AHCI or virtio-blk would be the next driver.
-- Possible next steps: copy-on-write fork, pipes and `dup2`, a directory-aware filesystem, ACPI + PCI enumeration, networking.
+- Possible next steps: copy-on-write fork, a directory-aware filesystem, signals, ACPI + PCI enumeration, networking.

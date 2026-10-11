@@ -15,8 +15,8 @@ Needs `qemu-system-x86_64`. Each test boots a fresh VM from a *copy* of `build/d
 | Layer | Where | What it checks |
 |---|---|---|
 | Kernel boot self-test | `karnel/mm.cpp` (`mm_selftest`) | frame allocator, page tables, heap grow/coalesce - the runner fails if any `[FAIL]` appears in the boot log |
-| User-space suite | `tests/user/selftest.c` (installed as `/bin/selftest`) | libc (printf, strtol, string functions), `malloc`/`realloc`/`calloc`, `brk`/`mmap`/`munmap`, `fork`, `wait`, `exec`, `spawn`, file create/read/delete, `readdir`, `ps`, `meminfo` |
-| End-to-end runner | `tests/run_tests.py` | boot log, shell, argv, fault isolation, frame leaks, background jobs, timer, PS/2 keyboard IRQ, disk persistence across a reboot |
+| User-space suite | `tests/user/selftest.c` (installed as `/bin/selftest`) | libc (printf, strtol, string functions), `malloc`/`realloc`/`calloc`, `brk`/`mmap`/`munmap`, `fork`, `wait`, `exec`, `spawn`, pipes (incl. blocking on a full pipe, EOF, no-reader errors), `dup`/`dup2`, stdout redirection into pipes and files, file create/read/delete, `readdir`, `ps`, `meminfo` |
+| End-to-end runner | `tests/run_tests.py` | boot log, shell, argv, fault isolation, frame leaks, background jobs, shell pipelines and redirection, timer, PS/2 keyboard IRQ, disk persistence across a reboot |
 
 ## Adding tests
 

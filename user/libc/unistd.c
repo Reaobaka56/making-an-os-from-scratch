@@ -26,3 +26,6 @@ int   munmap(void* addr, size_t len)          { return __sys(SYS_MUNMAP, (long)a
 int   readdir(int slot, DirInfo* out)         { return __sys(SYS_READDIR, slot, (long)out, 0); }
 int   ps(PsInfo* out, int max)                { return __sys(SYS_PS, (long)out, max, 0); }
 int   meminfo(MemInfo* out)                   { return __sys(SYS_MEMINFO, (long)out, 0, 0); }
+int  dup(int fd)                              { return __sys(SYS_DUP, fd, 0, 0); }
+int  dup2(int oldfd, int newfd)               { return __sys(SYS_DUP2, oldfd, newfd, 0); }
+int  pipe(int fds[2])                         { return __sys(SYS_PIPE, (long)fds, 0, 0); }

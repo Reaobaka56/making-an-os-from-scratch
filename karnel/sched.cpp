@@ -6,7 +6,7 @@
 #include "heap.hpp"
 #include "irq.hpp"
 #include "console.hpp"
-#include "fs.hpp"
+#include "fdtable.hpp"
 #include <string.h>
 
 namespace {
@@ -29,7 +29,6 @@ void reap() {
         if (t->state == TState::Dead && t != current) {
             if (prev) prev->next = nx; else head = nx;
             if (t->is_user) vmm_destroy_space(t->cr3);
-            for (auto& f : t->files) if (f.wbuf) kfree(f.wbuf);
             kfree(t->kstack);
             delete t;
         } else prev = t;
@@ -108,6 +107,7 @@ Thread* thread_create_user(const char* name, uint64_t cr3, uint64_t entry, uint6
     t->parent = parent;
     t->brk_base = t->brk_cur = brk;
     t->mmap_next = 0x0000600000000000ULL;
+    fd_init_std(t);
     prepare_stack(t, user_main, nullptr, t->kstack_top);
     link(t);
     return t;
@@ -119,8 +119,8 @@ Thread* thread_create_fork(Thread* parent, uint64_t cr3, const SyscallFrame* fra
     t->is_user = true;
     t->parent = parent->id;
     t->brk_base = parent->brk_base; t->brk_cur = parent->brk_cur; t->mmap_next = parent->mmap_next;
-    for (int i = 0; i < MAX_FDS; i++)                       // inherit read-only descriptors
-        if (parent->files[i].used && !parent->files[i].writable) t->files[i] = parent->files[i];
+    for (int i = 0; i < MAX_FDS; i++)                       // inherit every open descriptor (shared)
+        if (parent->files[i].kind != FD_NONE) fd_dup_into(t->files[i], parent->files[i]);
     auto* fr = reinterpret_cast<SyscallFrame*>((t->kstack_top - sizeof(SyscallFrame)) & ~15ULL);
     *fr = *frame;
     prepare_stack(t, fork_child_main, fr, reinterpret_cast<uint64_t>(fr));
@@ -173,6 +173,7 @@ void sleep_ms(uint64_t ms) {
 
 void thread_exit(int code) {
     IrqGuard g;
+    fd_close_all(current, false);          // drop pipe/file references so readers see EOF
     exit_log[exit_pos++ % 64] = {current->id, current->parent, code, false};
     current->state = TState::Dead;
     for (;;) schedule();     // never resumed; reaped by the next thread
@@ -208,14 +209,6 @@ size_t sched_snapshot(PsInfo* out, size_t max) {
         n++;
     }
     return n;
-}
-
-void close_all_files(Thread* t) {
-    for (auto& f : t->files) {
-        if (!f.used) continue;
-        if (f.writable && f.wbuf) { fs_write(f.name, f.wbuf, f.wlen); kfree(f.wbuf); f.wbuf = nullptr; }
-        f.used = false;
-    }
 }
 
 size_t thread_count() {

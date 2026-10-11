@@ -12,6 +12,9 @@ long write(int fd, const void* buf, size_t n);
 int  open(const char* path, int flags);
 int  close(int fd);
 int  unlink(const char* path);
+int  dup(int fd);
+int  dup2(int oldfd, int newfd);
+int  pipe(int fds[2]);        // fds[0] = read end, fds[1] = write end
 int  fork(void);
 int  execv(const char* path, char* const argv[]);
 int  wait(int* status);
